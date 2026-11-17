@@ -1,0 +1,25 @@
+{
+  "name": "yure-japan-earthquake-atlas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:client": "vite --host 127.0.0.1",
+    "dev:server": "node --watch server/index.mjs",
+    "build": "vite build",
+    "start": "node server/index.mjs",
+    "test": "node --test server/api.test.mjs"
+  },
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "express": "^5.1.0",
+    "vue": "^3.5.22",
+    "vuetify": "^3.10.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.1.12"
+  }
+}

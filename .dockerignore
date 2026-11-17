@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+data
+**/*.sqlite*
+**/*.db
+.env
+.env.*
+.npmrc
+*.log
+coverage

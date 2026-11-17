@@ -1,0 +1,104 @@
+name: Build and publish Docker image
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and test image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: yure-ci:latest
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test running container
+        shell: bash
+        run: |
+          docker run --detach --name yure-ci \
+            --publish 127.0.0.1:3001:3001 \
+            --volume yure-ci-data:/app/data yure-ci:latest
+          curl --fail --silent --show-error --retry 30 --retry-connrefused \
+            --retry-delay 2 --max-time 5 http://127.0.0.1:3001/api/health
+          curl --fail --silent --show-error http://127.0.0.1:3001/ | grep 'id="app"'
+          curl --fail --silent --show-error 'http://127.0.0.1:3001/api/earthquakes?days=7' \
+            | jq --exit-status '.demo == true and (.events | length > 0) and (.prefectures | length == 47)'
+
+      - name: Show container logs and clean up
+        if: always()
+        shell: bash
+        run: |
+          if docker container inspect yure-ci > /dev/null 2>&1; then
+            docker logs yure-ci
+            docker rm --force yure-ci
+          fi
+          if docker volume inspect yure-ci-data > /dev/null 2>&1; then
+            docker volume rm yure-ci-data
+          fi
+
+      - name: Validate publishing credentials
+        if: github.event_name != 'pull_request'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_TOKEN" ]]; then
+            echo "::error::Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN in repository Actions secrets."
+            exit 1
+          fi
+
+      - name: Generate Docker Hub tags
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.DOCKERHUB_REPOSITORY || 'japan-shaking' }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Publish tested image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
